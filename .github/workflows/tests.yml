@@ -1,0 +1,44 @@
+name: tests
+on: [push, pull_request, workflow_dispatch]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: witness
+
+      # The transitive set of sibling repos.  When it goes stale the failure is
+      # "Component X not found".
+      - name: Sibling checkouts
+        run: |
+          for repo in cl-nostr secp256k1-fast seal natrium json-simple cl-transport cl-sev-snp cram; do
+            git clone --depth 1 -q https://github.com/modus-lisp/$repo.git "$repo"
+          done
+
+      - name: Install SBCL
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sbcl
+
+      # Quicklisp for the third-party libraries cl-nostr uses.  Retried: it is the one
+      # step that reaches the network.
+      - name: Quicklisp dependencies
+        run: |
+          for attempt in 1 2 3; do
+            rm -rf ~/quicklisp
+            curl -sSLo /tmp/quicklisp.lisp https://beta.quicklisp.org/quicklisp.lisp || { sleep 5; continue; }
+            sbcl --non-interactive --load /tmp/quicklisp.lisp \
+                 --eval '(quicklisp-quickstart:install :path "~/quicklisp/")' \
+                 --eval '(ql-util:without-prompting (ql:add-to-init-file))' && break
+            echo "quicklisp install attempt $attempt failed; retrying"
+            sleep 10
+          done
+          sbcl --non-interactive --eval '(ql:quickload (list :bordeaux-threads :cl-base64))'
+
+      - name: Tests
+        run: |
+          sbcl --non-interactive \
+               --eval '(dolist (d (list "cl-nostr/" "secp256k1-fast/" "seal/" "natrium/" "json-simple/"
+                                        "cl-transport/" "cl-sev-snp/" "cram/" "witness/"))
+                         (push (merge-pathnames d (uiop:getcwd)) asdf:*central-registry*))' \
+               --eval '(asdf:test-system :witness)'
