@@ -14,6 +14,10 @@
 ;;;;               measurement is MEASUREMENT.
 ;;;;   observed    a value the witness saw that carries no vendor signature.  Its word only.
 ;;;;   endorsed    the signer accepts a release (after audit) for use.
+;;;;   routed      the signer read the source of a service's image (MEASUREMENT, built from
+;;;;               SOURCE) and says where it sends each model's requests: ROUTES maps a
+;;;;               model id to the providers that can receive it.  A claim about code, so
+;;;;               it is worth as much as the readers who agree on it.
 ;;;;   proclaim    (DEP-14) the signer vouches for the key NPUB: a trust edge.
 ;;;;   revoked     (DEP-14) the signer withdraws one of its own events, named by id.
 ;;;;   nip05, challenge, ringsig   (DEP-14) read, never written here.
@@ -32,10 +36,10 @@
 (defconstant +kind+ 55502 "DEP-14 attestation kind: regular, so every statement is kept.")
 
 (defparameter +methods+
-  '("attested" "reproduced" "observed" "endorsed" "proclaim" "revoked" "nip05" "challenge" "ringsig")
+  '("attested" "reproduced" "observed" "endorsed" "routed" "proclaim" "revoked" "nip05" "challenge" "ringsig")
   "Methods this library reads.  It writes all but the DEP-14 identity checks.")
 
-(defparameter +written-methods+ '("attested" "reproduced" "observed" "endorsed" "proclaim" "revoked"))
+(defparameter +written-methods+ '("attested" "reproduced" "observed" "endorsed" "routed" "proclaim" "revoked"))
 
 (define-condition witness-error (error)
   ((reason :initarg :reason :reader witness-error-reason))
@@ -82,6 +86,7 @@ PCR0|PCR1|PCR2 for Nitro, or the register list for SEV-SNP/TDX."
 or for a revocation the id it voids."
   (let ((method (%get body "method")))
     (cond ((member method '("attested" "observed") :test #'equal) (%get body "endpoint"))
+          ((equal method "routed") (%get body "service"))
           ((equal method "reproduced")
            (format nil "~a@~a~@[:~a~]" (%get body "repo") (%get body "commit") (%get body "target")))
           ((equal method "endorsed") (or (%key-subject body) (%get body "subject")))
@@ -93,6 +98,7 @@ or for a revocation the id it voids."
   (let ((method (%get body "method")) (m (measurement-key (%get body "measurement"))) (out '()))
     (when (member method '("attested" "observed") :test #'equal)
       (push (list "i" (format nil "endpoint:~a" (%get body "endpoint"))) out))
+    (when (equal method "routed") (push (list "i" (format nil "endpoint:~a" (%get body "service"))) out))
     (when (equal method "reproduced") (push (list "i" (format nil "source:~a" (%subject body))) out))
     (when (and (equal method "endorsed") (null (%key-subject body)))
       (push (list "i" (format nil "subject:~a" (%get body "subject"))) out))
@@ -109,6 +115,13 @@ or for a revocation the id it voids."
       (cond ((equal method "attested") (need "platform" "endpoint" "fetched_at" "document_b64" "measurement"))
             ((equal method "reproduced") (need "repo" "commit" "artifact_sha256" "measurement" "toolchain"))
             ((equal method "observed") (need "endpoint" "what" "value"))
+            ((equal method "routed")
+             (need "service" "measurement" "source" "routes")
+             (let ((routes (%get body "routes")))
+               (unless (and (hash-table-p routes)
+                            (loop for v being the hash-values of routes
+                                  always (and (vectorp v) (not (stringp v)) (every #'stringp v))))
+                 (%fail "routed statement's routes must map model ids to arrays of provider names"))))
             ((equal method "endorsed") (unless (or (%get body "npub") (%get body "subject"))
                                          (%fail "endorsed statement names neither npub nor subject")))
             ((equal method "revoked") (need "revokes"))

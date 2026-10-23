@@ -142,6 +142,33 @@ reproduced it.  More than one key means the reproducers disagree."
   "For ENDPOINT: alist of measurement-key -> witnesses who saw it attested there."
   (%by-measurement policy "attested" endpoint))
 
+(defun routed-providers (policy measurement model &key service (threshold 1))
+  "Where the image measured as MEASUREMENT (a measurement object, or its MEASUREMENT-KEY)
+sends MODEL, according to counting `routed' statements (about SERVICE, if given).
+Returns (values PROVIDERS SIGNERS CONFLICT):
+  PROVIDERS  the sorted provider list at least THRESHOLD distinct trusted signers agree
+             on, or NIL;
+  SIGNERS    the signers who agree on it;
+  CONFLICT   an alist (PROVIDERS . SIGNERS) when trusted signers disagree -- then
+             PROVIDERS is NIL, because a disputed route table is no route table."
+  (let ((key (if (stringp measurement) (string-downcase measurement) (measurement-key measurement)))
+        (groups '()))
+    (dolist (st (policy-statements policy))
+      (when (and (equal (statement-method st) "routed")
+                 (equal (measurement-key (statement-field st "measurement")) key)
+                 (or (null service) (equal (statement-subject st) service)))
+        (let ((p (%get (statement-field st "routes") model)))
+          (when p
+            (let* ((set (sort (remove-duplicates (coerce p 'list) :test #'equal) #'string<))
+                   (cell (assoc set groups :test #'equal)))
+              (if cell
+                  (pushnew (statement-signer st) (cdr cell) :test #'equal)
+                  (push (list set (statement-signer st)) groups)))))))
+    (cond ((cdr groups) (values nil nil groups))
+          ((and groups (>= (length (cdar groups)) threshold))
+           (values (caar groups) (cdar groups) nil))
+          (t (values nil (and groups (cdar groups)) nil)))))
+
 (defun conflicts (policy)
   "Subjects whose `reproduced' statements disagree on the measurement: a source that
 builds to different images for different trusted reproducers."

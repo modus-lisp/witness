@@ -21,12 +21,15 @@ Statements are [DEP-14](https://github.com/bitcoin-deposits/deposits/blob/main/D
 | `reproduced` | the signer built `repo` at `commit` with this toolchain and got this measurement |
 | `observed` | the signer saw a value with no vendor signature (its word only) |
 | `endorsed` | the signer accepts a release for use |
+| `routed` | the signer read a service image's source and says which providers each model's requests can go to |
 | `proclaim` | the signer vouches for the key `npub`, optionally bounding how far it may vouch in turn (`depth`) |
 | `revoked` | the signer withdraws one of its own statements, named by id |
 
 How subjects are tagged, so relays can index them:
 - A pubkey subject goes in `p`.
 - Anything else goes in `i`: `endpoint:HOST`, `source:REPO@COMMIT[:TARGET]`, `measurement:PCR0|PCR1|PCR2`.
+
+`contrib/opensecret-routed.lisp` reads Maple's OpenSecret route table at the source an approval names and signs it as a `routed` statement. It refuses anything it can't parse, and publishes nothing.
 
 ## Trust
 

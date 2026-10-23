@@ -204,8 +204,52 @@
       (check "store reports the bad line" (= 1 (length bad))))
     (delete-file path)))
 
+(defun routed (kp measurement &rest routes)
+  "A `routed' statement by KP about MEASUREMENT: ROUTES alternate model and provider list."
+  (w:make-statement-event
+   kp (w:obj "method" "routed" "service" "enclave.example" "measurement" measurement
+             "source" "example/repo@abc123" "file" "registry.rs"
+             "routes" (apply #'w:obj (loop for (m ps) on routes by #'cddr
+                                           collect m collect (coerce ps 'vector))))))
+
+(defun test-routed ()
+  (let* ((root (keys:generate-keypair)) (b (keys:generate-keypair)) (c (keys:generate-keypair))
+         (stranger (keys:generate-keypair))
+         (sb (w:event->statement (routed b *pcr-a* "m1" '("x") "m2" '("x" "y"))))
+         (ts (lambda (&rest more) (append (list (vouch root b)) more))))
+    (check "routed: subject is the service, indexed by endpoint and measurement"
+           (and (equal (w:statement-subject sb) "enclave.example")
+                (find "endpoint:enclave.example" (ev:event-tags (w:statement-event sb)) :key #'second :test #'equal)
+                (find-if (lambda (tg) (and (equal (first tg) "i") (search "measurement:" (second tg))))
+                         (ev:event-tags (w:statement-event sb)))))
+    (check "routed: routes must map models to arrays of names"
+           (signals-witness-error
+            (w:make-statement-event b (w:obj "method" "routed" "service" "s" "measurement" *pcr-a*
+                                             "source" "r@c" "routes" (w:obj "m1" "x")))))
+    (let ((p (w:make-policy (funcall ts sb) :roots (list (pub root)))))
+      (check "routed: a trusted reader's routes are returned, sorted"
+             (equal (w:routed-providers p *pcr-a* "m2") '("x" "y")))
+      (check "routed: by measurement key string too"
+             (equal (w:routed-providers p (w:measurement-key *pcr-a*) "m1") '("x")))
+      (check "routed: another image has no routes"
+             (null (w:routed-providers p *pcr-b* "m1")))
+      (check "routed: a model the statement does not list has no routes"
+             (null (w:routed-providers p *pcr-a* "m3")))
+      (check "routed: the threshold counts distinct signers"
+             (null (w:routed-providers p *pcr-a* "m1" :threshold 2))))
+    (let ((p (w:make-policy (list (w:event->statement (routed stranger *pcr-a* "m1" '("x"))))
+                            :roots (list (pub root)))))
+      (check "routed: an untrusted reader counts for nothing"
+             (null (w:routed-providers p *pcr-a* "m1"))))
+    (let ((p (w:make-policy (funcall ts sb (vouch root c)
+                                     (w:event->statement (routed c *pcr-a* "m1" '("x" "z"))))
+                            :roots (list (pub root)))))
+      (multiple-value-bind (providers signers conflict) (w:routed-providers p *pcr-a* "m1")
+        (check "routed: trusted readers who disagree are a conflict, not an answer"
+               (and (null providers) (null signers) (= 2 (length conflict))))))))
+
 (defun run ()
   (setf *pass* 0 *fail* '())
-  (test-statements) (test-policy) (test-evidence) (test-store)
+  (test-statements) (test-policy) (test-routed) (test-evidence) (test-store)
   (format t "~&witness: ~d passed, ~d failed~%" *pass* (length *fail*))
   (null *fail*))

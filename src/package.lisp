@@ -19,7 +19,7 @@
    #:policy #:make-policy #:policy-trusted #:policy-statements #:policy-rejected #:follow-edges
    #:trusted-signer-p #:signer-depth
    #:supporting-signers #:accepted-p #:conflicts
-   #:reproduced-measurements #:attested-measurements
+   #:reproduced-measurements #:attested-measurements #:routed-providers
    #:witness-error #:*evidence-checkers*
    ;; evidence (witness/evidence)
    #:nitro-attested-body #:check-attested-evidence))
